@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpinClean</title>
+<style>
+:root{--bg:#eef5f7;--ink:#12303b;--card:#fff;--aqua:#1f9db0;--aqua-dark:#157788;--line:#cfdde2;--warn:#b3402a}
+@media (prefers-color-scheme:dark){:root{--bg:#f0e0e0;--ink:#444242;--card:#a2ae9d;--aqua:#1c292b;--aqua-dark:#383b3b;--line:#a2ae9d;--warn:#ff9078}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:520px;margin:0 auto;padding:150px 16px 48px}
+h1{font-size:2rem;margin:0 0 4px;letter-spacing:-.02em}
+.sub{margin:0 0 20px;opacity:.8}
+.machine{display:flex;gap:16px;align-items:center;background:var(--card);border:2px solid var(--line);border-radius:20px;padding:16px;margin-bottom:20px}
+.drum{flex:none;width:92px;height:92px;border-radius:50%;border:8px solid var(--ink);display:grid;place-items:center;color:#fff;font-weight:700;text-align:center;font-size:.8rem;padding:4px}
+.drum.busy{animation:spin 3s linear infinite}
+.drum.busy span{animation:spin 3s linear infinite reverse}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.drum.busy,.drum.busy span{animation:none}}
+.machine h2{margin:0;font-size:1.15rem}
+.machine p{margin:2px 0 0;opacity:.8}
+form{display:flex;flex-direction:column;gap:8px;margin-bottom:24px}
+label{font-weight:600}
+.row{display:flex;gap:8px}
+input{flex:1;min-width:0;font:inherit;padding:12px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--ink)}
+button{font:inherit;font-weight:600;border:0;border-radius:12px;padding:12px 16px;background:var(--aqua-dark);color:#fff;cursor:pointer;min-height:44px}
+button.ghost{background:transparent;color:var(--ink);border:2px solid var(--line)}
+button.danger{background:transparent;color:var(--warn);border:2px solid var(--warn)}
+:focus-visible{outline:3px solid var(--aqua);outline-offset:2px}
+ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+li{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:12px 14px}
+li.me{border-color:var(--aqua)}
+.top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.who{font-weight:700;overflow-wrap:anywhere}
+.eta{opacity:.75;font-size:.9rem;white-space:nowrap}
+.btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.empty,.msg{opacity:.8}
+.msg{color:var(--warn);min-height:1.5em}
+footer{margin-top:28px;font-size:.85rem;opacity:.7}
+</style>
+</head>
+<body>
+<main>
+  <h1 style="text-align:center;">SpinClean</h1>
+  <p class="sub" style="text-align: center;">Skip the walk and save your spot in line!</p>
+
+  <section class="machine" aria-live="polite">
+    <div class="drum" id="drum"><span id="drumText">Free</span></div>
+    <div>
+      <h2 id="mTitle">Estimated Time: 40 minutes(per wash)</h2>
+      <p id="mSub"></p>
+    </div>
+  </section>
+
+  <form id="joinForm">
+    <label for="name">Your name/Room Number</label>
+    <div class="row">
+      <input id="name" maxlength="30" autocomplete="off" required placeholder="name/room number">
+      <button type="submit">Join queue</button>
+    </div>
+  </form>
+
+  <p class="msg" id="msg" role="status"></p>
+  <ol id="queue" aria-label="Washing queue"></ol>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// Paste your own values here (Supabase > Project Settings > API).
+// The anon key is meant to be public; never put the service_role key here.
+const SUPABASE_URL = 'https://pqvnbhgwivhunmncrmxe.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxdm5iaGd3aXZodW5tbmNybXhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA5NjA0OTksImV4cCI6MjEwNjUzNjQ5OX0.cBUceajosaQi1H9F8t45wK-CjilqS0NG_MAlvcgaaS8';
+const WASH_MINUTES = 45;           // assumed length of one wash
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = (id) => document.getElementById(id);
+
+// Remember which entries were created on THIS device (no accounts needed).
+let mine = [];
+try { mine = JSON.parse(localStorage.getItem('mine') || '[]'); } catch (e) {}
+function saveMine() { try { localStorage.setItem('mine', JSON.stringify(mine)); } catch (e) {} }
+
+function say(text) { $('msg').textContent = text || ''; }
+
+async function load() {
+  // Only read rows from the last 24 hours. A cron job also deletes old rows.
+  const since = new Date(Date.now() - DAY_MS).toISOString();
+  const { data, error } = await db.from('queue').select('*')
+    .gte('created_at', since).order('created_at', { ascending: true });
+  if (error) { say('Could not load the queue. Check your internet and retry.'); return; }
+  say('');
+  render(data);
+}
+
+function render(rows) {
+  const washing = rows.find(r => r.status === 'washing');
+  const waiting = rows.filter(r => r.status === 'waiting');
+
+  // Machine panel
+  if (washing) {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(washing.started_at)) / 60000));
+    $('drum').classList.add('busy');
+    $('drumText').textContent = 'Busy';
+    $('mTitle').textContent = washing.name + ' is washing';
+    $('mSub').textContent = 'Started ' + mins + ' min ago. Usually takes ~' + WASH_MINUTES + '.';
+  } else {
+    $('drum').classList.remove('busy');
+    $('drumText').textContent = 'Free';
+    $('mTitle').textContent = 'Machine is free';
+    $('mSub').textContent = waiting.length ? waiting[0].name + ' is next.' : 'Nobody is waiting.';
+  }
+
+  // Queue list: the one washing first, then waiting in order
+  const list = $('queue');
+  list.innerHTML = '';
+  const ordered = (washing ? [washing] : []).concat(waiting);
+  if (!ordered.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'The queue is empty. Add your name to claim the machine.';
+    list.appendChild(li);
+    return;
+  }
+
+  ordered.forEach((r) => {
+    const isMine = mine.includes(r.id);
+    const li = document.createElement('li');
+    if (isMine) li.className = 'me';
+
+    const top = document.createElement('div');
+    top.className = 'top';
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = r.name + (isMine ? ' (you)' : '');   // textContent = safe from HTML injection
+    const eta = document.createElement('span');
+    eta.className = 'eta';
+
+    if (r.status === 'washing') {
+      eta.textContent = 'Washing now';
+    } else {
+      const pos = waiting.indexOf(r);                      // people waiting ahead of this one
+      const wait = (pos + (washing ? 1 : 0)) * WASH_MINUTES;
+      eta.textContent = pos === 0 && !washing ? 'Up next' : '#' + (pos + 1) + ' · ~' + wait + ' min';
+    }
+    top.append(who, eta);
+    li.appendChild(top);
+
+    if (isMine) {
+      const btns = document.createElement('div');
+      btns.className = 'btns';
+      const canStart = r.status === 'waiting' && !washing && waiting[0].id === r.id;
+      if (canStart) btns.appendChild(button('Start washing', '', () => startWash(r.id)));
+      btns.appendChild(button(r.status === 'washing' ? 'I\'m done' : 'Leave queue',
+        r.status === 'washing' ? '' : 'danger', () => leave(r.id)));
+      li.appendChild(btns);
+    }
+    list.appendChild(li);
+  });
+}
+
+function button(label, cls, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = label;
+  if (cls) b.className = cls;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+async function join(name) {
+  const { data, error } = await db.from('queue').insert({ name }).select().single();
+  if (error) { say('Could not join. Try again.'); return; }
+  mine.push(data.id); saveMine();
+  load();
+}
+
+async function startWash(id) {
+  const { error } = await db.from('queue')
+    .update({ status: 'washing', started_at: new Date().toISOString() }).eq('id', id);
+  if (error) say('Could not start. Try again.');
+  load();
+}
+
+async function leave(id) {
+  const { error } = await db.from('queue').delete().eq('id', id);
+  if (error) { say('Could not remove you. Try again.'); return; }
+  mine = mine.filter(x => x !== id); saveMine();
+  load();
+}
+
+$('joinForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('name').value.trim();
+  if (!name) return;
+  $('name').value = '';
+  join(name);
+});
+
+load();
+setInterval(load, 10000);   // simple polling so everyone sees fresh data
+</script>
+</body>
+</html>
