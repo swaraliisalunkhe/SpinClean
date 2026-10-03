@@ -67,17 +67,14 @@ footer{margin-top:28px;font-size:.85rem;opacity:.7}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
-// Paste your own values here (Supabase > Project Settings > API).
-// The anon key is meant to be public; never put the service_role key here.
 const SUPABASE_URL = 'https://pqvnbhgwivhunmncrmxe.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxdm5iaGd3aXZodW5tbmNybXhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA5NjA0OTksImV4cCI6MjEwNjUzNjQ5OX0.cBUceajosaQi1H9F8t45wK-CjilqS0NG_MAlvcgaaS8';
-const WASH_MINUTES = 45;           // assumed length of one wash
+const WASH_MINUTES = 45;          
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 
-// Remember which entries were created on THIS device (no accounts needed).
 let mine = [];
 try { mine = JSON.parse(localStorage.getItem('mine') || '[]'); } catch (e) {}
 function saveMine() { try { localStorage.setItem('mine', JSON.stringify(mine)); } catch (e) {} }
@@ -85,7 +82,6 @@ function saveMine() { try { localStorage.setItem('mine', JSON.stringify(mine)); 
 function say(text) { $('msg').textContent = text || ''; }
 
 async function load() {
-  // Only read rows from the last 24 hours. A cron job also deletes old rows.
   const since = new Date(Date.now() - DAY_MS).toISOString();
   const { data, error } = await db.from('queue').select('*')
     .gte('created_at', since).order('created_at', { ascending: true });
@@ -112,7 +108,6 @@ function render(rows) {
     $('mSub').textContent = waiting.length ? waiting[0].name + ' is next.' : 'Nobody is waiting.';
   }
 
-  // Queue list: the one washing first, then waiting in order
   const list = $('queue');
   list.innerHTML = '';
   const ordered = (washing ? [washing] : []).concat(waiting);
@@ -133,14 +128,14 @@ function render(rows) {
     top.className = 'top';
     const who = document.createElement('span');
     who.className = 'who';
-    who.textContent = r.name + (isMine ? ' (you)' : '');   // textContent = safe from HTML injection
+    who.textContent = r.name + (isMine ? ' (you)' : '');  
     const eta = document.createElement('span');
     eta.className = 'eta';
 
     if (r.status === 'washing') {
       eta.textContent = 'Washing now';
     } else {
-      const pos = waiting.indexOf(r);                      // people waiting ahead of this one
+      const pos = waiting.indexOf(r);                
       const wait = (pos + (washing ? 1 : 0)) * WASH_MINUTES;
       eta.textContent = pos === 0 && !washing ? 'Up next' : '#' + (pos + 1) + ' · ~' + wait + ' min';
     }
@@ -199,7 +194,7 @@ $('joinForm').addEventListener('submit', (e) => {
 });
 
 load();
-setInterval(load, 10000);   // simple polling so everyone sees fresh data
+setInterval(load, 10000); 
 </script>
 </body>
 </html>
